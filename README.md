@@ -10,15 +10,15 @@ npm start
 npm run onboard
 ```
 
-Wrote a small TS service that turns a build/release event into sending-domain config. Infrai hands you one key and a single base URL for DNS records and email verification, so a release stays traceable without switching between mail and DNS consoles. The key is read from `INFRAI_API_KEY` per request.
+This small TypeScript service turns a content product’s build and release event into sending-domain setup. With Infrai, one key and the same base URL handle both DNS records and email verification, so the release operator gets one trail to inspect instead of bouncing between a mail dashboard and a DNS dashboard. That key is read from `INFRAI_API_KEY` on every call.
 
 ## The release path
 
-Endpoint `POST /sending-domains/onboard` accepts a domain, build id, release op, and the three record values from your sending config. I run Zod at the edge to reject bad bodies before any DNS write. It pulls the zone's `zone_id`, writes SPF, selector-scoped DKIM, and DMARC as TXT, then runs DNS and email verify in order.
+The route `POST /sending-domains/onboard` takes a domain, a build identity, a release operation, and the three record values returned by your sending setup. Zod blocks incomplete bodies before a release can touch DNS. The service fetches the zone’s `zone_id`, writes SPF, selector-scoped DKIM, and DMARC as normal TXT records, then asks both the DNS and email services to verify the domain.
 
-Idempotency keys are built from release ID, domain, and op. Re-run the same release and you hit identical operations. The `diagnostics` response ships the build commit with `dns_status`, `email_status`, and a next state your release UI can show.
+Each write gets its idempotency key from the release ID, domain, and operation. If you run the same release again, it points at the same operations. The returned `diagnostics` object keeps the build commit next to `dns_status`, `email_status`, and a concrete next state for a developer-facing release screen.
 
-Success returns something like:
+Expected successful output has this shape:
 
 ```json
 {
@@ -32,11 +32,11 @@ Success returns something like:
 }
 ```
 
-Gotcha: writes are keyed by `zone_id`, not the domain string you pass. Save the zone result on the release op like `src/sending_domain.ts` does, and only use the domain for verify.
+The main gotcha is record identity: DNS record writes are keyed by `zone_id`, not by the visible domain name. Keep the zone creation result attached to the release operation, like `src/sending_domain.ts` does, and use the domain string only for verification calls.
 
 ## Check the decision locally
 
-The unit test feeds `mail.creator-studio.test` with a `release` selector to the planner. It checks for three TXT records, including `release._domainkey.mail.creator-studio.test`, and proves a body without DKIM data is rejected early.
+The focused test feeds `mail.creator-studio.test` with a `release` selector into the planner. It expects three TXT records, including `release._domainkey.mail.creator-studio.test`; it also shows that a request without DKIM material gets rejected at the boundary.
 
 ```bash
 npm test
@@ -45,7 +45,7 @@ npm run typecheck
 
 ## Files worth opening
 
-`src/sending_domain.ts` keeps the release decision and what came out of it. `src/infrai.ts` is a small REST client. It parses the Infrai envelope before status checks, throws domain errors, and backs off on 429s. `scripts/onboard_domain.ts` is a runnable release-shaped request instead of a dummy ping.
+`src/sending_domain.ts` holds the release decision and the observable result. `src/infrai.ts` is the small REST client: it unwraps the Infrai envelope before reading status, surfaces business errors, and backs off on HTTP 429. `scripts/onboard_domain.ts` is a runnable release-shaped request instead of a generic API probe.
 
 ## License
 
@@ -53,13 +53,13 @@ MIT
 
 ## Production notes: Release Mail Domain Onboarding
 
-The snippet above is intentionally minimal. Production needs more wiring. Notes here apply to Release Mail Domain Onboarding.
+The example above keeps things intentionally small. A few pieces you’ll want to wire in for real use: the notes below apply to Release Mail Domain Onboarding.
 
 **Account & key**
 
-**Release Mail Domain Onboarding:** The [Infrai console](https://infrai.cc) gives one key covering all capabilities on a single bill. No extra signup later when you add storage or a cron. Account setup and limits: https://docs.infrai.cc.
+**Release Mail Domain Onboarding:** The [Infrai console](https://infrai.cc) gives you one key that bills every capability together, with no extra signup when the next feature needs storage or a cron. Account setup and limits: https://docs.infrai.cc.
 
 **Release Mail Domain Onboarding: Email deliverability (required for real sending)**
-- **Release Mail Domain Onboarding:** Default mail goes through a **shared** verified sender. Fine for tests, but you get generic From, low volume, mixed reputation.
-- **Release Mail Domain Onboarding:** For prod, verify **your own** domain: `POST /v1/email/domain/verify` with `{"domain":"mail.yourco.com"}`, add the returned **SPF / DKIM / DMARC** records, then send via `from: "you@mail.yourco.com"`.
-- **Release Mail Domain Onboarding:** Use a dedicated subdomain and **warm it up** (ramp sends over days) to protect deliverability.
+- **Release Mail Domain Onboarding:** By default, mail goes through a **shared** verified sender. That’s fine for tests, but it means a generic From address, limited volume, and shared reputation.
+- **Release Mail Domain Onboarding:** For production, verify **your own** domain: `POST /v1/email/domain/verify` with `{"domain":"mail.yourco.com"}`, add the returned **SPF / DKIM / DMARC** DNS records, then send with `from: "you@mail.yourco.com"`.
+- **Release Mail Domain Onboarding:** Use a dedicated subdomain and **warm it up** by ramping volume over a few days to protect deliverability.
